@@ -93,6 +93,9 @@ def load_resources():
         print(f"[WARNING] Battery data not found at {DATA_FILE}")
 
 
+# Initialize resources when module is imported by Gunicorn
+load_resources()
+
 # ---------------------------------------------------------------------------
 # Route: Main Dashboard Page
 # ---------------------------------------------------------------------------
