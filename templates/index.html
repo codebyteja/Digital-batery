@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<!--
+=============================================================================
+EV Battery Digital Twin — Main Dashboard Page
+=============================================================================
+Single-page application with 5 tab sections:
+  1. Dashboard  — Battery prediction with SoH gauge, RUL, and history chart
+  2. Charging Advisor — Optimal charging recommendations
+  3. Cost Estimator — Degradation cost impact analysis
+  4. Upload Report — PDF service report parser
+  5. About — Model metrics, project info, and future extensions
+=============================================================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AI-Powered Digital Twin for EV Battery Health Monitoring — Predict State of Health, Remaining Useful Life, and get smart charging recommendations.">
+
+    <title>EV Battery Digital Twin</title>
+
+    <!-- Favicon: battery emoji as SVG -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔋</text></svg>">
+
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- NAVBAR                                                              -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <nav class="navbar">
+        <a class="navbar-brand" href="/">
+            <div class="brand-icon">⚡</div>
+            <div>
+                <h1>EV Battery Digital Twin</h1>
+                <span class="subtitle">AI-Powered Health Monitoring</span>
+            </div>
+        </a>
+
+        <ul class="nav-tabs">
+            <li class="nav-tab active" data-tab="dashboard">🔋 Dashboard</li>
+            <li class="nav-tab" data-tab="advisor">⚡ Charging Advisor</li>
+            <li class="nav-tab" data-tab="cost">💰 Cost Estimator</li>
+        </ul>
+    </nav>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- MAIN CONTENT                                                        -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <main class="main-content">
+
+        <!-- ─────────────────────────────────────────────────────────────── -->
+        <!-- TAB 1: DASHBOARD                                                -->
+        <!-- ─────────────────────────────────────────────────────────────── -->
+        <div id="dashboard" class="tab-panel active">
+            <h2 class="section-title">Battery Health Dashboard</h2>
+            <p class="section-subtitle">Select a battery or enter values manually to predict health metrics</p>
+
+            <div class="grid-2">
+                <!-- Left: Input Form -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3>Prediction Input</h3>
+                            <p>Enter battery parameters or select a sample battery</p>
+                        </div>
+                    </div>
+
+                    <!-- Universal File Upload (NEW) -->
+                    <div class="upload-zone" id="universalUploadZone" style="border: 2px dashed var(--border-color); border-radius: 8px; padding: 1.5rem; text-align: center; margin-bottom: 1.5rem; cursor: pointer; transition: all 0.3s ease;">
+                        <input type="file" id="universalFileInput" accept=".zip,.mat,.csv,.pdf" style="display: none;">
+                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">📁</div>
+                        <h4 style="margin: 0 0 0.5rem 0;">Universal File Upload</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">Drop ANY file (.zip, .mat, .csv, .pdf) or click to browse</p>
+                        <div id="universalUploadStatus" style="margin-top: 1rem; font-size: 0.9rem; font-weight: 500; display: none;"></div>
+                    </div>
+
+                    <!-- Battery selector dropdown -->
+                    <div class="form-group">
+                        <label for="batterySelect">Sample Battery</label>
+                        <select id="batterySelect" class="form-control" onchange="onBatterySelect()">
+                            <option value="">— Select a battery —</option>
+                            {% for bid in battery_ids %}
+                            <option value="{{ bid }}">{{ bid }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <!-- Manual inputs -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="voltageInput">Voltage (V)</label>
+                            <input type="number" id="voltageInput" class="form-control"
+                                   placeholder="e.g. 3.5" step="0.01" min="2.0" max="4.5" value="3.6">
+                        </div>
+                        <div class="form-group">
+                            <label for="currentInput">Current (A)</label>
+                            <input type="number" id="currentInput" class="form-control"
+                                   placeholder="e.g. 1.0" step="0.01" min="0.1" max="5.0" value="1.0">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="temperatureInput">Temperature (°C)</label>
+                            <input type="number" id="temperatureInput" class="form-control"
+                                   placeholder="e.g. 30" step="0.1" min="-10" max="60" value="30">
+                        </div>
+                        <div class="form-group">
+                            <label for="cycleInput">Cycle Number</label>
+                            <input type="number" id="cycleInput" class="form-control"
+                                   placeholder="e.g. 50" step="1" min="1" max="2000" value="50">
+                        </div>
+                    </div>
+
+                    <button id="predictBtn" class="btn btn-primary btn-block" onclick="runPrediction()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">⚡ Predict Battery Health</span>
+                    </button>
+                </div>
+
+                <!-- Right: Quick Summary (visible after prediction) -->
+                <div class="card" style="display:flex;flex-direction:column;justify-content:center">
+                    <div class="card-header">
+                        <div class="icon green">📊</div>
+                        <div>
+                            <h3>Quick Summary</h3>
+                            <p>Run a prediction to see results</p>
+                        </div>
+                    </div>
+
+                    <div id="resultsPanel" class="results-panel">
+                        <!-- Status Badge -->
+                        <div style="text-align:center;margin-bottom:1.5rem">
+                            <span id="statusBadge" class="status-badge healthy">✅ Healthy</span>
+                        </div>
+
+                        <!-- 4 Circular Gauges in 2x2 grid -->
+                        <div class="grid-2" style="gap:1.5rem">
+                            <!-- SoC Gauge -->
+                            <div class="stat-card" style="display:flex;flex-direction:column;align-items:center;padding:1rem;">
+                                <div style="width:120px;height:120px;position:relative;">
+                                    <canvas id="gaugeSoc"></canvas>
+                                    <div id="socCenter" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-weight:700;font-size:1.2rem;color:var(--text-light)">—</div>
+                                </div>
+                                <div class="stat-label" style="margin-top:0.5rem;">State of Charge</div>
+                            </div>
+
+                            <!-- SoH Gauge -->
+                            <div class="stat-card" style="display:flex;flex-direction:column;align-items:center;padding:1rem;">
+                                <div style="width:120px;height:120px;position:relative;">
+                                    <canvas id="gaugeSoh"></canvas>
+                                    <div id="sohCenter" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-weight:700;font-size:1.2rem;color:var(--text-light)">—</div>
+                                </div>
+                                <div class="stat-label" style="margin-top:0.5rem;">State of Health</div>
+                            </div>
+
+                            <!-- RUL Gauge -->
+                            <div class="stat-card" style="display:flex;flex-direction:column;align-items:center;padding:1rem;">
+                                <div style="width:120px;height:120px;position:relative;">
+                                    <canvas id="gaugeRul"></canvas>
+                                    <div id="rulCenter" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-weight:700;font-size:1.5rem;color:var(--text-light)">—</div>
+                                </div>
+                                <div class="stat-label" style="margin-top:0.5rem; text-align:center;">Remaining Charges</div>
+                                <div id="rulYearsLabel" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; text-align:center;">(Full 100% to 0% cycles)</div>
+                            </div>
+
+                            <!-- Temperature Gauge -->
+                            <div class="stat-card" style="display:flex;flex-direction:column;align-items:center;padding:1rem;">
+                                <div style="width:120px;height:120px;position:relative;">
+                                    <canvas id="gaugeTemp"></canvas>
+                                    <div id="tempCenter" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-weight:700;font-size:1.2rem;color:var(--text-light)">—</div>
+                                </div>
+                                <div class="stat-label" style="margin-top:0.5rem;">Temperature <span id="tempWarning" style="display:none;color:#ef4444;">⚠️</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Placeholder shown before prediction -->
+                    <div id="placeholderHint" style="text-align:center;padding:2rem 0;color:var(--text-muted)">
+                        <div style="font-size:2.5rem;margin-bottom:0.75rem">🔋</div>
+                        <p>Enter battery parameters and click <strong>Predict</strong> to analyze health</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SoH History Chart -->
+            <div class="card" style="margin-top:1.5rem">
+                <div class="card-header">
+                    <div class="icon purple">📈</div>
+                    <div>
+                        <h3>SoH Degradation Trend</h3>
+                        <p>Historical capacity fade over charge cycles</p>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="sohHistoryChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Visual Battery Defect Detection -->
+            <div class="card" style="margin-top:1.5rem">
+                <div class="card-header">
+                    <div class="icon amber">🔬</div>
+                    <div>
+                        <h3>Visual Battery Defect Detection</h3>
+                        <p>AI-Powered Multi-Image Analysis &amp; Report Generation</p>
+                    </div>
+                </div>
+
+                <p style="font-size:0.85rem;color:var(--text-secondary);line-height:1.7;margin-bottom:1rem">
+                    Upload a <strong>ZIP archive</strong> of battery photos, a <strong>single image</strong> (JPG/PNG), or a <strong>bulk PDF</strong> of service X-ray / plain photos. The AI inspects every image and generates a downloadable detection report you can share with the service centre.
+                </p>
+
+                <!-- Upload Zone -->
+                <div class="upload-zone" id="defectUploadZone" style="border: 2px dashed var(--primary); padding: 2rem 1.5rem; text-align: center; border-radius: 12px; cursor: pointer; transition: all 0.3s ease; background: rgba(99,102,241,0.04);">
+                    <div style="font-size: 2.8rem; margin-bottom: 0.6rem;">📦</div>
+                    <div style="font-size: 1rem; font-weight: 700; color: var(--text-light); margin-bottom:0.3rem;">Drop Files Here or Click to Browse</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted);">Accepts <strong>.zip</strong> (multiple images) &nbsp;&middot;&nbsp; <strong>.jpg / .png</strong> (single image) &nbsp;&middot;&nbsp; <strong>.pdf</strong> (bulk service report)</div>
+                    <input type="file" id="defectFileInput" accept=".jpg,.jpeg,.png,.pdf,.zip" style="display: none;">
+                </div>
+
+                <!-- Loading -->
+                <div id="defectLoading" style="display:none; text-align:center; margin-top:1.5rem;">
+                    <span class="spinner" style="display:inline-block; border-color:var(--primary); border-top-color:transparent; width:2rem; height:2rem;"></span>
+                    <div style="font-size:0.9rem; color:var(--text-muted); margin-top:0.75rem; font-weight:500;">🔍 Analyzing battery images with AI...</div>
+                    <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.2rem;">This may take a moment for bulk files</div>
+                </div>
+
+                <!-- Result Box -->
+                <div id="defectResultBox" style="display:none; margin-top:1.5rem; padding:1.5rem; border-radius:12px; text-align:center;">
+                    <div id="defectResultBadge" style="font-size:1.8rem; font-weight:800; margin-bottom:0.5rem; letter-spacing:-0.5px;"></div>
+                    <div id="defectActionMsg" style="font-size:0.95rem; font-weight:700; margin:0.6rem auto; padding:0.5rem 1.2rem; border-radius:8px; display:none; max-width:460px;"></div>
+                    <div style="display:flex; gap:0.7rem; justify-content:center; flex-wrap:wrap; margin:0.8rem 0;">
+                        <span id="defectConfidence" style="font-size:0.85rem; background:rgba(255,255,255,0.08); padding:0.3rem 0.9rem; border-radius:20px; color:var(--text-secondary);"></span>
+                        <span id="defectImageType" style="font-size:0.85rem; background:rgba(255,255,255,0.08); padding:0.3rem 0.9rem; border-radius:20px; color:var(--text-secondary);"></span>
+                        <span id="defectBulkInfo" style="font-size:0.85rem; background:rgba(255,255,255,0.08); padding:0.3rem 0.9rem; border-radius:20px; color:var(--text-secondary); display:none;"></span>
+                    </div>
+                    <div id="defectBreakdown" style="display:none; margin-top:1rem; text-align:left; background:rgba(0,0,0,0.18); border-radius:8px; padding:0.8rem 1rem; max-height:360px; overflow-y:auto; font-size:0.82rem;"></div>
+                    <div id="defectDemoNote" style="font-size:0.75rem; color:var(--text-muted); margin-top:0.6rem; font-style:italic;"></div>
+                    <div id="defectDownloadZone" style="display:none; margin-top:1.2rem; padding-top:1rem; border-top:1px solid var(--border-color);">
+                        <div style="font-size:0.82rem; color:var(--text-muted); margin-bottom:0.6rem;">📄 AI-Generated Detection Report:</div>
+                        <img id="defectCompositeImg" src="" alt="Detection Result" style="max-width:100%; border-radius:8px; border:1px solid var(--border-color); margin-bottom:0.8rem; display:block;">
+                        <a id="defectDownloadBtn" href="#" download="battery_detection_report.png"
+                           style="display:inline-block; padding:0.6rem 1.6rem; background:var(--primary); color:#fff; border-radius:8px; font-weight:600; text-decoration:none; font-size:0.9rem;">
+                            ⬇️ Download Detection Report
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ─────────────────────────────────────────────────────────────── -->
+        <!-- TAB 2: CHARGING ADVISOR                                         -->
+        <!-- ─────────────────────────────────────────────────────────────── -->
+        <div id="advisor" class="tab-panel">
+            <h2 class="section-title">⚡ Smart Charging Advisor</h2>
+            <p class="section-subtitle">Get personalized charging recommendations based on your driving habits</p>
+
+            <div class="grid-2">
+                <!-- Input -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="icon blue">🚗</div>
+                        <div>
+                            <h3>Daily Usage</h3>
+                            <p>Enter your typical daily driving distance</p>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dailyDistanceInput">Daily Driving Distance (km)</label>
+                        <input type="number" id="dailyDistanceInput" class="form-control"
+                               placeholder="e.g. 60" step="1" min="1" max="500" value="60">
+                    </div>
+
+                    <button id="advisorBtn" class="btn btn-success btn-block" onclick="getAdvisorRecommendation()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">💡 Get Recommendation</span>
+                    </button>
+                </div>
+
+                <!-- Recommended SoC Range -->
+                <div class="card">
+                    <div id="advisorResults" class="results-panel">
+                        <div class="callout success">
+                            <h4>✅ Recommended Charging Range</h4>
+                            <p>
+                                For your <strong id="usageLevel">—</strong> usage pattern, keep your battery between
+                                <strong id="socRangeMin" class="text-green">—</strong> and
+                                <strong id="socRangeMax" class="text-green">—</strong> SoC for optimal longevity.
+                            </p>
+                        </div>
+                        <div class="callout info">
+                            <h4>ℹ️ Why This Range?</h4>
+                            <p>
+                                Keeping lithium-ion batteries between 20-80% SoC minimizes stress on
+                                the electrode materials. Charging to 100% or discharging to 0% frequently
+                                accelerates capacity fade and increases internal resistance.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div id="advisorPlaceholder" style="text-align:center;padding:3rem 0;color:var(--text-muted)">
+                        <div style="font-size:2.5rem;margin-bottom:0.75rem">⚡</div>
+                        <p>Enter your daily distance to get recommendations</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Comparison Table -->
+            <div id="advisorResults" class="results-panel" style="margin-top:1.5rem">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="icon amber">📊</div>
+                        <div>
+                            <h3>Charging Method Comparison</h3>
+                            <p>Impact of different charging speeds on battery degradation</p>
+                        </div>
+                    </div>
+
+                    <div style="overflow-x:auto">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Charging Method</th>
+                                    <th>Degradation</th>
+                                    <th>Charging Time</th>
+                                    <th>Est. Lifespan</th>
+                                    <th>Recommendation</th>
+                                </tr>
+                            </thead>
+                            <tbody id="advisorTableBody">
+                                <tr>
+                                    <td colspan="5" style="text-align:center;color:var(--text-muted);padding:2rem">
+                                        Run the advisor to see comparison data
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ─────────────────────────────────────────────────────────────── -->
+        <!-- TAB 3: COST ESTIMATOR                                           -->
+        <!-- ─────────────────────────────────────────────────────────────── -->
+        <div id="cost" class="tab-panel">
+            <h2 class="section-title">💰 Battery Degradation Cost Estimator</h2>
+            <p class="section-subtitle">Understand the financial impact of battery degradation and potential savings</p>
+
+            <div class="grid-2">
+                <!-- Input -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="icon green">💵</div>
+                        <div>
+                            <h3>Cost Parameters</h3>
+                            <p>Enter your battery replacement cost and current health</p>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="costReplacementInput">Battery Replacement Cost ($)</label>
+                        <input type="number" id="costReplacementInput" class="form-control"
+                               placeholder="e.g. 10000" step="100" min="1000" max="50000" value="10000">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="costSohInput">Current SoH (%) <span style="font-size:0.7rem;color:var(--text-muted)">— auto-filled from prediction</span></label>
+                        <input type="number" id="costSohInput" class="form-control"
+                               placeholder="e.g. 85" step="0.1" min="0" max="100" value="85">
+                    </div>
+
+                    <button id="costBtn" class="btn btn-primary btn-block" onclick="calculateCost()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">📊 Calculate Cost Impact</span>
+                    </button>
+                </div>
+
+                <!-- Results -->
+                <div class="card">
+                    <div id="costResults" class="results-panel">
+                        <!-- Cost Impact Stats -->
+                        <div class="grid-2" style="gap:1rem;margin-bottom:1.5rem">
+                            <div class="stat-card" style="padding:1rem">
+                                <div class="stat-label">Current Degradation Cost</div>
+                                <div id="costImpactValue" class="stat-value text-red" style="font-size:1.5rem">—</div>
+                            </div>
+                            <div class="stat-card" style="padding:1rem">
+                                <div class="stat-label">3-Year Savings Potential</div>
+                                <div id="savingsValue" class="stat-value text-green" style="font-size:1.5rem">—</div>
+                            </div>
+                        </div>
+
+                        <!-- Projected SoH -->
+                        <div class="callout info">
+                            <h4>📈 3-Year SoH Projection</h4>
+                            <p>
+                                Current habits: SoH drops to <strong id="current3yrSoh" class="text-yellow">—</strong><br>
+                                Optimized habits: SoH stays at <strong id="optimized3yrSoh" class="text-green">—</strong>
+                            </p>
+                        </div>
+
+                        <!-- Cost Comparison Bars -->
+                        <h4 style="font-size:0.85rem;font-weight:600;margin-top:1.5rem;margin-bottom:0.5rem">
+                            3-Year Cost Comparison
+                        </h4>
+                        <div class="cost-comparison">
+                            <div class="cost-bar">
+                                <div class="bar-wrapper">
+                                    <div id="currentCostBar" class="bar-fill current" style="height:10%">—</div>
+                                </div>
+                                <div class="bar-label">Current Habit</div>
+                            </div>
+                            <div class="cost-bar">
+                                <div class="bar-wrapper">
+                                    <div id="optimizedCostBar" class="bar-fill optimized" style="height:10%">—</div>
+                                </div>
+                                <div class="bar-label">Optimized Habit</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="costPlaceholder" style="text-align:center;padding:3rem 0;color:var(--text-muted)">
+                        <div style="font-size:2.5rem;margin-bottom:0.75rem">💰</div>
+                        <p>Enter cost parameters to see financial impact</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+    </main>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- CHATBOT WIDGET (floating, bottom-right corner)                      -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    
+    <button id="chatbotToggle" class="chatbot-toggle" aria-label="Open chatbot">💬</button>
+
+    <div id="chatbotWindow" class="chatbot-window">
+        <div class="chat-header">
+            <div class="chat-avatar">🤖</div>
+            <div>
+                <h4>Battery Assistant</h4>
+                <p>Ask about battery health & tips</p>
+            </div>
+        </div>
+
+        <div id="chatMessages" class="chat-messages">
+            <!-- Messages are added dynamically by JS -->
+        </div>
+
+        <div id="chatSuggestions" style="display:flex; flex-wrap:wrap; gap:8px; padding:10px; background:var(--surface); border-top:1px solid var(--border-color);">
+            <!-- Suggestion chips will go here -->
+        </div>
+
+        <div class="chat-input-area">
+            <input type="text" id="chatInput" placeholder="Type a message..." autocomplete="off">
+            <button id="chatSendBtn" aria-label="Send message">➤</button>
+        </div>
+    </div>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- JavaScript                                                          -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <script src="/static/js/main.js"></script>
+
+    <!-- Hide placeholder when results appear -->
+    <script>
+        // Observer to toggle placeholder visibility
+        const observer = new MutationObserver(() => {
+            const resultsPanel = document.getElementById('resultsPanel');
+            const placeholder = document.getElementById('placeholderHint');
+            if (resultsPanel && placeholder) {
+                placeholder.style.display = resultsPanel.classList.contains('visible') ? 'none' : 'block';
+            }
+
+            const costResults = document.getElementById('costResults');
+            const costPlaceholder = document.getElementById('costPlaceholder');
+            if (costResults && costPlaceholder) {
+                costPlaceholder.style.display = costResults.classList.contains('visible') ? 'none' : 'block';
+            }
+        });
+
+        // Observe class changes on results panels
+        ['resultsPanel', 'costResults'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) observer.observe(el, { attributes: true, attributeFilter: ['class'] });
+        });
+    </script>
+</body>
+</html>
